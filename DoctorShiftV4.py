@@ -33,14 +33,15 @@ class DutyScheduler:
         for day in range(1, num_days+1):
             available_doctors = [doc for doc in self.doctors if day not in self.constraints[doc]["unavailable_days"]]
             assigned_doctors = set()  # เก็บแพทย์ที่ได้รับมอบหมายในวันนั้น
+            random.shuffle(available_doctors)  # สุ่มแพทย์เพื่อกระจายเวรอย่างยุติธรรม
             
             for role in self.roles:
-                valid_doctors = [doc for doc in available_doctors if role not in self.constraints[doc]["unavailable_roles"]
-                                 and duty_counts[doc] < self.constraints[doc]["max_shifts"]
+                valid_doctors = [doc for doc in available_doctors if role not in self.constraints[doc]["unavailable_roles"] 
+                                 and duty_counts[doc] < self.constraints[doc]["max_shifts"] 
                                  and doc not in assigned_doctors]
                 
                 if valid_doctors:
-                    selected_doctor = random.choice(valid_doctors)
+                    selected_doctor = min(valid_doctors, key=lambda d: duty_counts[d])  # เลือกแพทย์ที่มีเวรน้อยที่สุด
                     self.schedule.at[day, role] = selected_doctor
                     duty_counts[selected_doctor] += 1
                     assigned_doctors.add(selected_doctor)
@@ -73,20 +74,6 @@ class DutyScheduler:
         
         return pd.DataFrame.from_dict(summary, orient='index')
 
-    def export_to_excel(self, filename):
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Duty Schedule"
-        
-        ws.append(["Day"] + self.roles)
-        for day, row in self.schedule.iterrows():
-            ws.append([day] + list(row))
-            if day in self.holidays:
-                for col in range(1, len(self.roles)+2):
-                    ws.cell(row=ws.max_row, column=col).fill = PatternFill(start_color="FFFF00", fill_type="solid")
-        
-        wb.save(filename)
-
 # เริ่มต้น Streamlit App
 st.title("ระบบจัดเวรแพทย์อัตโนมัติ")
 
@@ -100,16 +87,21 @@ num_days = st.number_input("จำนวนวันในเดือนนี�
 holidays = st.multiselect("เลือกวันหยุดราชการ", list(range(1, num_days+1)))
 scheduler.set_holidays(holidays)
 
-st.subheader("เพิ่มแพทย์")
+st.subheader("เพิ่มหรือแก้ไขแพทย์")
 new_doc_name = st.text_input("ชื่อแพทย์")
 max_shifts = st.number_input("จำนวนเวรสูงสุดในเดือนนี้", min_value=1, max_value=num_days, value=10)
 unavailable_days = st.multiselect("เลือกวันที่ไม่สะดวกอยู่เวร", list(range(1, num_days+1)))
 preferred_days = st.multiselect("เลือกวันที่สะดวกอยู่เวร", list(range(1, num_days+1)))
 unavailable_roles = st.multiselect("เลือกเวรที่ไม่สะดวก", scheduler.roles)
 
-if st.button("เพิ่มแพทย์"):
+if st.button("บันทึกแพทย์"):
     scheduler.add_doctor(new_doc_name, max_shifts, unavailable_days, preferred_days, unavailable_roles)
-    st.success(f"เพิ่มแพทย์ {new_doc_name} เรียบร้อย")
+    st.success(f"บันทึกข้อมูลของ {new_doc_name} เรียบร้อย")
+
+st.subheader("รายชื่อแพทย์และเงื่อนไข")
+for doctor in scheduler.doctors:
+    if doctor in scheduler.constraints:
+        st.write(f"**{doctor}**: สูงสุด {scheduler.constraints[doctor]['max_shifts']} เวร | ไม่สะดวก: {scheduler.constraints[doctor]['unavailable_days']} | เวรที่ไม่สะดวก: {scheduler.constraints[doctor]['unavailable_roles']}")
 
 st.subheader("จัดตารางเวร")
 if st.button("สร้างตารางเวร"):
@@ -121,8 +113,3 @@ if st.button("สร้างตารางเวร"):
         st.write(summary)
     else:
         st.error("ไม่สามารถจัดเวรได้ตามเงื่อนไขทั้งหมด กรุณาปรับเงื่อนไข")
-    
-    filename = "duty_schedule.xlsx"
-    scheduler.export_to_excel(filename)
-    with open(filename, "rb") as file:
-        st.download_button(label="ดาวน์โหลดไฟล์ Excel", data=file, file_name=filename, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
